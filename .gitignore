@@ -5,3 +5,8 @@
 /agents/entire-agent-kiro/entire-agent-kiro
 /agents/entire-agent-kilo/entire-agent-kilo
 bin/
+
+# pr-impact local index shards
+.pr-index/
+.pr-impact-index/
+.env
