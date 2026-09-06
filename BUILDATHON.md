@@ -148,6 +148,41 @@ checked:
   skill's instruction to open the cited line before acting is what catches
   the difference. This is documented rather than smoothed over.
 
+**Final semantic diff of the submitted implementation.** Run over our own
+change, `c47a489..HEAD` (17 commits):
+
+```
+entire graph diff --base c47a489 --head HEAD --repo . --json
+  12 files, 72 entity-level changes
+```
+
+The result is **structurally incomplete, and the graph says so**. All seven of
+our JavaScript files are skipped:
+
+```
+W_UNSUPPORTED_FILE  ci/pr-impact/bin/pr-impact.mjs
+  "file skipped; no parser for this file type, so its changes are not analyzed"
+  ... same for lib/{gate,notify,transcript,databricks}.mjs and both test files
+```
+
+Git counts 2,259 added lines across those files; the semantic diff reports
+zero entity changes in them. What it does analyze is the surrounding change:
+the CI workflow (`jobs.analyze`, `jobs.publish`), the settings edits, and 38
+documentation sections.
+
+**The two subcommands disagree, and that is worth stating.** `entire graph
+symbols` *does* parse `.mjs` — JavaScript is reported at `semantic` tier and
+the index contains our real functions (`analyze`, `checkpointIntent`,
+`buildSurface`, `packageMatches`, `renderMarkdown` …). `entire graph diff`
+declines the same files as unsupported. So the graph can see our
+implementation's structure but cannot diff it.
+
+We are reporting the diff we actually got rather than implying full coverage.
+This is the same discipline the product itself enforces: incomplete analysis
+must be labelled incomplete, never presented as authoritative. It is also a
+limitation of *our* evidence — the entity-level review of our own code rests
+on the test suite and on reading, not on a semantic diff.
+
 **A negative result, also verified.** `external-agents` shows **zero**
 module-level dependencies on `cli`. That is correct: external agents
 communicate with the CLI over a JSON stdin/stdout subprocess protocol, not Go
@@ -425,6 +460,11 @@ local shards instead of failing the check.
   higher, but route-string matching across repos is **not yet implemented**.
   This is the most valuable next step and the largest gap between the current
   build and the microservice claim in full generality.
+- **Our own implementation is not covered by the semantic diff.**
+  `entire graph diff` skips `.mjs` as `W_UNSUPPORTED_FILE` even though
+  `entire graph symbols` parses JavaScript at semantic tier, so the
+  entity-level review of our 2,259 lines rests on tests and reading rather
+  than on graph evidence.
 - **Citations point at the enclosing function**, not the exact call line
   (verified: reported 59, actual call 60).
 - **Go-centric.** Module identity comes from `go.mod`. Other ecosystems need
