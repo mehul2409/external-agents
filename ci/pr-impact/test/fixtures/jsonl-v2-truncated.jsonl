@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-06T09:00:00.000Z", "event": "session_started", "session_id": "t-1", "repository": "github.com/example/checkout-service"}
+{"timestamp": "2026-09-06T09:00:03.000Z", "event": "user_prompt", "session_id": "t-1", "text": "Rework the auth token path."}
+{"timestamp": "2026-09-06T09:00:09.000Z", "event": "agent_response", "session_id": "t-1", "tex

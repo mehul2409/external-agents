@@ -1,0 +1,9 @@
+  branch       build
+  checkpoints  2
+
+● 0874724419f8  "Pull the latest build branch — Databricks is now verified..."
+  09-06 11:32 (deae614) Pre-noon stable checkpoint: record state, unresolved work, risks
+
+● f7f01f0c1f5b  "We're building pr-impact for BTW Buildathon Track 3 in th..."
+  09-06 11:21 (db337bd) Track pr-impact CLI entrypoint; anchor bin/ ignore to repo root
+

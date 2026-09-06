@@ -1,0 +1,30 @@
+import { renderMarkdown } from "./old-impl.mjs";
+
+// A fully-resolved legacy run: every commit in range produced a readable
+// transcript. This is the case whose output must never change.
+const result = {
+  repo: "demo-auth", base: "HEAD~25", head: "HEAD",
+  changedExports: 3, indexedRepos: 2, remoteRows: 388,
+  intent: {
+    available: true, source: "transcript",
+    text: "rework parseclaims to return unverifiedclaims; auth-go only.",
+    resolved: 4, total: 4,
+  },
+  findings: [
+    {
+      symbol: "ParseClaims", kind: "function", changeType: "signature_changed",
+      breaking: true, file: "tokens/tokens.go", line: 137, localDependents: 2,
+      consumerRepos: ["gh/entireio/cli"],
+      consumers: [
+        { repoKey: "gh/entireio/cli", type: "CALLS", boundary: false, file: "auth/contexts.go", line: 59 },
+        { repoKey: "gh/entireio/cli", type: "CALLS", boundary: false, file: "auth/contexts.go", line: 173 },
+        { repoKey: "gh/entireio/cli", type: "CALLS", boundary: false, file: "auth/env_token.go", line: 64 },
+        { repoKey: "gh/entireio/cli", type: "CALLS", boundary: false, file: "login.go", line: 472 },
+        { repoKey: "gh/entireio/cli", type: "CALLS", boundary: false, file: "login.go", line: 512 },
+      ],
+      unmentionedRepos: ["gh/entireio/cli"],
+      boundaryHits: 0, risk: 53,
+    },
+  ],
+};
+process.stdout.write(renderMarkdown(result));

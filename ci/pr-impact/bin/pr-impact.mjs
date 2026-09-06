@@ -14,6 +14,9 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { normalize, canAssertAbsence } from "../lib/transcript.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -91,11 +94,40 @@ function run(cmd, args, { allowFail = false, cwd } = {}) {
   }
 }
 
-function* ndjson(text) {
+// Line-delimited JSON from the graph CLI. Malformed lines and unexpected
+// schema versions used to vanish silently, so a schema shift would look like
+// a smaller graph rather than an unreadable one. Both are now counted and
+// reported on stderr - the run still proceeds, because a partial graph is
+// more useful than no check, but it no longer passes unnoticed.
+const NDJSON_SCHEMA_MAJOR = 1;
+
+function* ndjson(text, stats = {}) {
+  stats.malformed ??= 0;
+  stats.schemas ??= new Set();
   for (const line of text.split("\n")) {
     const t = line.trim();
-    if (!t.startsWith("{")) continue;
-    try { yield JSON.parse(t); } catch { /* skip malformed */ }
+    if (!t) continue;
+    if (!t.startsWith("{")) { stats.malformed++; continue; }
+    let rec;
+    try { rec = JSON.parse(t); }
+    catch { stats.malformed++; continue; }
+    const declared = rec.schema_version ?? rec.schemaVersion;
+    if (declared !== undefined && declared !== null) stats.schemas.add(String(declared));
+    yield rec;
+  }
+}
+
+function reportNdjson(label, stats) {
+  if (stats.malformed) {
+    process.stderr.write(
+      `pr-impact: ${label}: skipped ${stats.malformed} unparseable line(s)\n`);
+  }
+  for (const v of stats.schemas ?? []) {
+    if (Number.parseInt(v, 10) > NDJSON_SCHEMA_MAJOR) {
+      process.stderr.write(
+        `pr-impact: ${label}: schema_version ${v} is newer than this build ` +
+        `understands (${NDJSON_SCHEMA_MAJOR}); fields may be missing\n`);
+    }
   }
 }
 
@@ -148,7 +180,8 @@ function buildSurface(opts) {
 
   let repoKey = null;
   const provides = [];
-  for (const rec of ndjson(symbolText)) {
+  const symbolStats = {};
+  for (const rec of ndjson(symbolText, symbolStats)) {
     if (rec.repo_key && !repoKey) repoKey = rec.repo_key;
     if (rec.record_type !== "symbol") continue;
     if (!CODE_LANGUAGES.has(rec.language)) continue;
@@ -168,9 +201,12 @@ function buildSurface(opts) {
     "graph", "edges", "--repo", opts.repo, "--format", "ndjson",
   ]);
 
+  reportNdjson("graph symbols", symbolStats);
+
   const consumes = [];
   const seen = new Set();
-  for (const rec of ndjson(edgeText)) {
+  const edgeStats = {};
+  for (const rec of ndjson(edgeText, edgeStats)) {
     if (rec.record_type !== "relation") continue;
     if (rec.relation_scope !== "external") continue;
 
@@ -198,6 +234,8 @@ function buildSurface(opts) {
       line: ev.start_line ?? null,
     });
   }
+
+  reportNdjson("graph edges", edgeStats);
 
   return {
     repoKey: repoKey ?? opts.repo,
@@ -287,40 +325,76 @@ function changedSymbols(opts) {
   return symbols;
 }
 
+// Collect one raw document per commit and hand them to the ingestion layer.
+//
+// This function deliberately knows NOTHING about transcript layout. It used
+// to decide readability by matching English prose ("No associated Entire
+// checkpoint") and to mine intent out of the human-rendered `checkpoint list`
+// table with a layout regex - so an upstream wording or column change would
+// silently turn a failure message into scored intent. Format knowledge now
+// lives in lib/transcript.mjs and nowhere else.
 function checkpointIntent(opts) {
   const log = run("git", ["-C", opts.repo, "log", "--format=%H",
     `${opts.base}..${opts.head}`], { allowFail: true });
   const commits = (log ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
-  if (!commits.length) return { available: false, text: "", resolved: 0, total: 0 };
+  if (!commits.length) return intentResult(normalize([]));
 
-  const parts = [];
-  let resolved = 0;
-  for (const sha of commits.slice(0, 25)) {
-    const body = run("entire", ["checkpoint", "explain", "--commit", sha],
-      { allowFail: true, cwd: opts.repo });
-    const usable = body
-      && !/No associated Entire checkpoint/i.test(body)
-      && !/checkpoint not found|failed to read checkpoint/i.test(body);
-    if (usable) { resolved++; parts.push(body); }
-  }
+  const documents = commits.slice(0, 25).map((sha) => ({
+    commit: sha,
+    raw: run("entire", ["checkpoint", "explain", "--commit", sha],
+      { allowFail: true, cwd: opts.repo }) ?? "",
+  }));
 
-  if (resolved === 0) {
-    const inRange = new Set(commits.map((c) => c.slice(0, 7)));
+  let intent = intentResult(normalize(documents));
+
+  // Tier 2: nothing resolved per-commit, so fall back to the checkpoint
+  // listing. It is a weaker source - one line of summary rather than a
+  // transcript - and normalize() labels it as such, so the report can say
+  // "summaries" instead of overstating what was read.
+  if (intent.resolved === 0) {
     const listing = run("entire", ["checkpoint", "list"],
       { allowFail: true, cwd: opts.repo }) ?? "";
-    for (const line of listing.split("\n")) {
-      const m = line.match(/^\s+\d\d-\d\d\s+\d\d:\d\d\s+\(([0-9a-f]{7,40})\)\s+(.+)$/);
-      if (m && inRange.has(m[1].slice(0, 7))) { resolved++; parts.push(m[2]); }
+    const inRange = new Set(commits.map((c) => c.slice(0, 7)));
+    const listed = normalize([{ commit: null, raw: listing }]);
+    const matched = listed.events.filter(
+      (e) => e.commit && inRange.has(e.commit.slice(0, 7)));
+    if (matched.length) {
+      intent = intentResult({
+        ...listed,
+        events: matched,
+        text: matched.map((e) => e.text).filter(Boolean).join("\n").toLowerCase(),
+        resolved: matched.length,
+        total: commits.length,
+        // Summaries are one line per commit; they are never a complete
+        // record of what the author considered.
+        completeness: "partial",
+        source: "summary",
+      });
     }
-    return {
-      available: resolved > 0, source: "summary",
-      text: parts.join("\n").toLowerCase(), resolved, total: commits.length,
-    };
   }
+  return intent;
+}
 
+// Adapt the normalized shape to what the rest of the tool consumes.
+// `available` is retained so existing consumers and the JSON output keep
+// working, but it is now derived from completeness rather than being the
+// binary truth it used to be.
+function intentResult(n) {
   return {
-    available: true, source: "transcript",
-    text: parts.join("\n").toLowerCase(), resolved, total: commits.length,
+    available: n.completeness !== "unavailable",
+    completeness: n.completeness,
+    source: n.source === "none" ? undefined : n.source,
+    text: n.text,
+    resolved: n.resolved,
+    total: n.total,
+    unknownEvents: n.unknownEvents,
+    unknownEventCount: n.unknownEventCount,
+    malformedLines: n.malformedLines,
+    formats: n.formats,
+    schemaVersions: n.schemaVersions,
+    // The single question the scorer and renderers must ask before stating
+    // that something is absent from the author's recorded reasoning.
+    canAssertAbsence: canAssertAbsence(n),
   };
 }
 
@@ -384,9 +458,17 @@ function analyze(opts, shards, remote) {
     if (!consumers.length) continue;
 
     const repos = [...new Set(consumers.map((c) => c.repoKey))];
-    const unmentioned = intent.available
-      ? repos.filter((r) => !intent.text.includes(r.split("/").pop().toLowerCase()))
-      : [];
+    // A repo whose name never appears in the intent we read. Whether that
+    // is a FINDING or merely a GAP depends entirely on how much we read.
+    const absent = intent.completeness === "unavailable"
+      ? []
+      : repos.filter((r) => !intent.text.includes(r.split("/").pop().toLowerCase()));
+    // Only a complete read supports the claim "the author never mentioned
+    // this". With 3 of 81 transcripts readable, 78 unread transcripts are
+    // not evidence of absence - asserting otherwise manufactures findings
+    // out of missing data.
+    const unmentioned = intent.canAssertAbsence ? absent : [];
+    const unacknowledged = intent.canAssertAbsence ? [] : absent;
 
     findings.push({
       symbol: sym.name,
@@ -399,6 +481,9 @@ function analyze(opts, shards, remote) {
       consumerRepos: repos,
       consumers: consumers.slice(0, 12),
       unmentionedRepos: unmentioned,
+      // Reported, but never scored: a demoted observation about what the
+      // readable subset happened to contain.
+      unacknowledgedRepos: unacknowledged,
       boundaryHits: consumers.filter((c) => c.boundary).length,
       risk: 0,
     });
@@ -408,6 +493,9 @@ function analyze(opts, shards, remote) {
     let score = Math.min(f.consumerRepos.length, 5) / 5 * 40;
     if (f.breaking) score += 30;
     if (f.boundaryHits) score += 15;
+    // Suppressed rather than scored when the read was partial: the +15
+    // exists to flag a consumer the author demonstrably did not consider,
+    // and a transcript we could not read demonstrates nothing.
     if (f.unmentionedRepos.length) score += 15;
     f.risk = Math.round(score);
   }
@@ -433,7 +521,8 @@ function renderMarkdown(r) {
     (r.remoteRows ? ` and ${r.remoteRows} Databricks row(s).` : "."),
   );
 
-  if (!r.intent.available) {
+  const c = r.intent.completeness ?? (r.intent.available ? "complete" : "unavailable");
+  if (c === "unavailable") {
     out.push("");
     out.push("> No checkpoint context for these commits - intent comparison unavailable.");
   } else {
@@ -442,6 +531,25 @@ function renderMarkdown(r) {
       `> Intent from checkpoint ${r.intent.source === "summary" ? "summaries" : "transcripts"}: ` +
       `${r.intent.resolved}/${r.intent.total} commits.`,
     );
+    // The count alone was already printed before this change and was still
+    // not wired to the claims below. Say plainly what a partial read means.
+    if (c === "partial") {
+      out.push(
+        `> **Partial context.** ${r.intent.total - r.intent.resolved} of ` +
+        `${r.intent.total} transcript(s) could not be read, so this run cannot ` +
+        `state that a consumer went unmentioned - only that it was not found ` +
+        `in the ${r.intent.resolved} that were readable.`,
+      );
+    }
+  }
+  if (r.intent.unknownEventCount) {
+    out.push(
+      `> ${r.intent.unknownEventCount} unrecognised checkpoint event(s) ignored: ` +
+      r.intent.unknownEvents.map((u) => `\`${u.type}\` x${u.count}`).join(", ") + ".",
+    );
+  }
+  if (r.intent.malformedLines) {
+    out.push(`> ${r.intent.malformedLines} malformed transcript line(s) skipped.`);
   }
   out.push("");
 
@@ -468,6 +576,17 @@ function renderMarkdown(r) {
       out.push(
         `⚠️ Never mentioned in checkpoint intent: ` +
         f.unmentionedRepos.map((x) => `\`${x}\``).join(", "),
+      );
+      out.push("");
+    }
+    // Same observation, demoted to what the evidence actually supports, and
+    // not scored. Stated as a fact about our reading, not about the author.
+    if (f.unacknowledgedRepos?.length) {
+      out.push(
+        `ℹ️ Not found in the ${r.intent.resolved} of ${r.intent.total} ` +
+        `transcript(s) that were readable: ` +
+        f.unacknowledgedRepos.map((x) => `\`${x}\``).join(", ") +
+        ` - unread transcripts may mention them, so this is not scored.`,
       );
       out.push("");
     }
@@ -562,7 +681,13 @@ async function main() {
   process.stdout.write("\n");
 }
 
-main().catch((err) => {
-  process.stderr.write(`pr-impact: ${err.message}\n`);
-  process.exit(1);
-});
+// Run only when invoked as the CLI, so the test suite can import the real
+// renderers and scorer rather than re-implementing them.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    process.stderr.write(`pr-impact: ${err.message}\n`);
+    process.exit(1);
+  });
+}
+
+export { analyze, renderMarkdown, renderText, checkpointIntent, ndjson };

@@ -1,0 +1,5 @@
+✗ No associated Entire checkpoint
+  commit   15f2c55
+  reason   no Entire-Checkpoint trailer
+  hint     the commit exists but was not created during an Entire session
+    (or its trailer was removed)

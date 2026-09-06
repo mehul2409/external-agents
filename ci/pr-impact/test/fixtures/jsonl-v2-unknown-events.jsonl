@@ -1,0 +1,7 @@
+{"timestamp": "2026-09-06T09:00:00.000Z", "event": "session_started", "session_id": "u-1", "repository": "github.com/example/checkout-service"}
+{"timestamp": "2026-09-06T09:00:01.000Z", "event": "sandbox_provisioned", "session_id": "u-1", "image": "acme/runner:9"}
+{"timestamp": "2026-09-06T09:00:02.000Z", "event": "permission_mode", "session_id": "u-1", "mode": "auto"}
+{"timestamp": "2026-09-06T09:00:03.000Z", "event": "user_prompt", "session_id": "u-1", "text": "Change ParseClaims to return UnverifiedClaims."}
+{"timestamp": "2026-09-06T09:00:04.000Z", "event": "telemetry_flush", "session_id": "u-1", "payload": {"n": 17}}
+{"timestamp": "2026-09-06T09:00:05.000Z", "event": "permission_mode", "session_id": "u-1", "mode": "plan"}
+{"timestamp": "2026-09-06T09:00:06.000Z", "event": "session_ended", "session_id": "u-1", "status": "completed"}

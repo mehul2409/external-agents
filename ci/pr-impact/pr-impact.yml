@@ -32,6 +32,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Unit tests (transcript ingestion)
+        run: node --test "ci/pr-impact/test/**/*.test.mjs"
+
       - name: Install Entire CLI and graph plugin
         run: |
           curl -fsSL https://install.entire.io | sh

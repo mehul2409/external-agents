@@ -1,0 +1,40 @@
+● Checkpoint 0874724419f8
+  session  85b3bfad-9da6-4e45-81cd-65add0f7f062
+  created  2026-09-06 06:02:43
+  author   mehul2409 <mehul.dev24@gmail.com>
+  tokens   732.4k
+  commits  deae614 Pre-noon stable checkpoint: record state, unresolved work, risks
+────────────────────────────────────────────────────────────
+## Intent
+
+Pull the latest build branch — Databricks is now verified end-to-end and BUIL...
+
+## Summary
+
+*Not generated yet. Run ‘entire checkpoint explain --generate 0874724419f8‘ to create an AI summary.*
+
+## Files (2)
+
+- `BUILDATHON.md`
+- `ci/pr-impact/STATUS.md`
+
+── Transcript (checkpoint scope) ───────────────────────────
+[User] Pull the latest build branch — Databricks is now verified end-to-end and BUILDATHON.md documents it. Create the pre-noon stable checkpoint: confirm the repo is runnable, then commit recording our current intent, completed work, unresolved work, and technical risks. Key risks to record: (1) protocol-level contracts (HTTP routes, gRPC, subprocess JSON) are not yet matched — only Go module imports are; (2) graph citations point at the enclosing function, not the exact call line; (3) index freshness is merge-time only.
+
+[Tool] Bash: Check status, remotes, and branch tracking
+
+[Tool] Bash: Pull latest build branch
+
+[Assistant] Up to date — my `db337bd` is in, plus two Databricks commits. Now verifying the repo is actually runnable.
+
+[Tool] Bash: Syntax check both modules and run help
+
+[Assistant] Syntax is fine, but "runnable" should mean it actually runs. Let me exercise the real path end-to-end locally.
+
+[Tool] Bash: Check graph plugin availability and capabilities
+
+[Assistant] Graph v0.4.0 is live (that dump should have been piped through `jq` — my mistake). Now the real end-to-end run:
+
+[Tool] Bash: Run index on this repo into scratchpad
+
+[Assistant] Index numbers match BUILDATHON.md's table exactly (1,160 / 2,867). Now `analyze`:

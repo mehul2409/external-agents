@@ -83,6 +83,8 @@ Components, all in this fork:
 | --- | --- |
 | `ci/pr-impact/bin/pr-impact.mjs` | `index` and `analyze` commands |
 | `ci/pr-impact/lib/databricks.mjs` | Shared index over the SQL Statement Execution API |
+| `ci/pr-impact/lib/transcript.mjs` | Single ingestion layer: detect → parse → normalize, for both transcript formats |
+| `ci/pr-impact/test/` | `node --test` suite; fixtures include the agent's real session |
 | `ci/pr-impact/pr-impact.yml` | Workflow: analyze on PR, publish on merge |
 
 ### Design decisions, and what forced them
@@ -152,20 +154,154 @@ contracts are a known gap (see limitations).
 
 ## Noon Curveball: what changed and how we adapted
 
-_To be completed after 12:00._
+**Track 3 — "The Agent Changed Its Format."** The integrated agent released a
+new transcript and lifecycle event format; existing users still emit the
+original one. Both must work, unknown events must not crash the check, and an
+incomplete transcript must yield a PARTIAL result rather than a discarded or
+corrupted session.
+
+### The assumption that broke
+
+We had assumed the formats we consume are **stable and all-or-nothing**. That
+assumption was load-bearing in three places in `ci/pr-impact/bin/pr-impact.mjs`,
+and all three were wrong:
+
+1. **Readability was decided by matching English prose.** `checkpointIntent`
+   tested the CLI's output against `/No associated Entire checkpoint/` and
+   `/checkpoint not found/`. A wording change upstream — or a localized build —
+   would silently flip "unreadable" to "readable" and let a *failure message*
+   be scored as author intent.
+2. **Tier-2 intent parsed a human-rendered table.** The fallback mined
+   `entire checkpoint list` with a layout regex over date/time columns. That is
+   a presentation surface, not a contract.
+3. **`ndjson()` swallowed malformed lines and ignored `schema_version`.** A
+   schema shift would present as a *smaller graph*, not as an unreadable one.
+
+### The bug this exposed, which is the real finding
+
+`checkpointIntent` returned `available: resolved > 0` — a **binary** flag. On
+our own demo run, intent resolved for **3 of 81 commits**. Because `available`
+was then true, `analyze` computed "repos not mentioned in the intent text" over
+the 3 transcripts we could read, and reported consumer repos as
+**"Never mentioned in checkpoint intent"** while **78 transcripts went unread**.
+That claim then added a real **+15 to the risk score**.
+
+We were presenting partial context as authoritative and manufacturing findings
+from the gap. The header already printed `3/81` honestly — the number was right
+there and simply was not wired to the claim. For a tool whose entire thesis is
+*"the author never considered this consumer,"* absence of evidence was being
+reported as evidence of absence. The Curveball forbids exactly this.
+
+### How the design changed
+
+A single ingestion layer, `ci/pr-impact/lib/transcript.mjs`. Per-format code
+exists in exactly one place and nothing downstream can see a format:
+
+```
+  raw → detectFormat()  → 'legacy-text' | 'jsonl-v2' | 'unknown'
+      → parse<format>() → the ONLY per-format code
+      → normalize()     → { events, unknownEvents[], completeness, resolved, total }
+```
+
+The pipeline is **not** forked per format. `analyze`, the scorer and both
+renderers consume the normalized shape only.
+
+**Detection is structural, never prose.** `detectFormat` keys on document
+structure — box-drawing rules, `## Intent` headings, `[User]`/`[Assistant]`
+markers, or a majority of lines being JSON objects with a discriminator. The
+test suite proves this by rewording the CLI's failure message into German and
+asserting it is *still* classified `unknown`.
+
+**Binary `available` replaced by three-state `completeness`:**
+
+| State | Meaning | What may be claimed |
+| --- | --- | --- |
+| `complete` | every commit in range resolved to an intact transcript | "Never mentioned in checkpoint intent" — scored, +15 |
+| `partial` | some resolved, or a resolved one was damaged | **demoted**: "not found in the N of M transcripts that were readable" — reported, **not scored** |
+| `unavailable` | none resolved | structural findings only (unchanged behaviour) |
+
+The demotion is the point. On a partial read the observation still appears —
+suppressing it entirely would hide real risk — but it is stated as a fact about
+*our reading*, not about the author, and it contributes nothing to the score.
+A finding that scored 53 on a complete read scores 38 on a partial one, and the
+15-point difference is precisely the claim we can no longer support.
+
+Note that a **truncated** transcript keeps a run at `partial` even when every
+commit resolved: full count with damaged content is not completeness.
+
+**Unknown events are counted and surfaced, never fatal.** An unrecognised event
+type contributes no text — an event we did not understand must not influence a
+finding it was not understood well enough to support — and it is reported in the
+PR comment (`4 unrecognised checkpoint event(s) ignored: \`permission_mode\` x2, …`).
+
+**`ndjson()` now counts malformed lines and reads `schema_version`**, warning on
+stderr when a stream is newer than the build understands. The run proceeds — a
+partial graph beats no check — but it no longer passes unnoticed.
+
+### One thing the fixture corrected
+
+Before the official fixture arrived we modelled `jsonl-v2` on the live
+Entire/Claude Code event stream, which keys events on `type`. The agent's real
+format keys on **`event`**. Our provisional detector classified the real fixture
+as `unknown` and read **zero** events from it — the exact failure this work
+exists to prevent, caught because we tested against the real artefact instead of
+our own assumption.
+
+The design held under that correction: the fix was confined to the per-format
+layer (a discriminator helper and a vocabulary table), and no pipeline, scoring
+or rendering code changed. Both discriminators are now read. That is the
+concrete evidence that the "one ingestion layer" design pays for itself.
+
+Splitting `checkpoint_created` into separate `intent` and `summary` events also
+came out of this: the original format renders them as two sections, so merging
+them would have made the two formats normalize *differently* — the precise
+divergence the layer exists to prevent.
+
+### Verification
+
+`node --test`, no new dependencies, wired into `pr-impact.yml` before the
+graph steps. **15/15 passing**, covering all four required cases plus the
+regression lock:
+
+| Case | Test |
+| --- | --- |
+| Original format | parses as today; prose-independent failure detection; `checkpoint list` treated as a *weak* summary source |
+| New format | the agent's real 17-line fixture parses fully, 0 unknown, 0 malformed; `event` **and** `type` discriminators; normalizes identically to the original on equivalent content; mixed-format ranges |
+| Unknown events | counted per type, surfaced, never thrown; wholly unknown/empty/`null` input degrades |
+| Incomplete input | 1 of 3 → `partial`; truncated-but-complete-count → `partial`; newer schema → read, flagged, not trusted |
+| **Regression** | a fully-resolved legacy transcript renders **byte-identical** to a golden captured from the pre-Curveball implementation at `15f2c55`, and scores identically (53) |
+
+The golden file was generated by running the **original** `renderMarkdown`
+before any edit, and is committed frozen. Regenerating it from current code
+would make the regression test a tautology; `test/fixtures/README.md` records
+that deliberately.
+
+Live end-to-end after the change: `index` still reports 1,160 symbols / 2,867
+external references, and `analyze --base HEAD~7` now prints
+`Intent from checkpoint transcripts: 1/7 commits` followed by the partial-context
+demotion — the real partial case, reported honestly.
 
 ## Checkpoint links and what each checkpoint proves
 
-_Checkpoint links to be added as milestones land._
+| Checkpoint | Commit | What it proves |
+| --- | --- | --- |
+| `f7f01f0c1f5b` | `db337bd` | **Initial understanding.** Reading the checkpoint back reconstructs the architecture — the `relation_scope: external` join, module-path over leaf-name matching, publish-on-merge — without re-reading the source. It also records a real defect found *while* establishing that understanding: a bare `bin/` in `.gitignore` had silently untracked the 554-line CLI entrypoint, so `git status` looked clean while both the workflow and the documented repro invoked a file a fresh clone would not have. |
+| `0874724419f8` | `deae614` | **Pre-noon stable.** Repo verified runnable by execution, not syntax-checking: index counts matching the documented table, `analyze` exit 0, `--no-remote` degraded path exercised. Records intent, completed/unresolved work and three named technical risks. It also corrects a stale claim — BUILDATHON.md still said checkpoint capture was inactive — which is the checkpoint trail catching the *document* drifting from reality. |
+| _this commit_ | Curveball | **Adaptation under a format change.** The reconstruction above was performed from checkpoint context *before* reading any code, and the graph impact analysis was run *before* editing — enumerating `analyze`, `renderMarkdown` and `renderText` as intent consumers and refuting `scoreFinding`, which does not exist (scoring is inline at `pr-impact.mjs:408-412`). |
 
-Checkpoint capture is **now active** in this fork. The earlier gap — Claude
-Code loads Entire hooks at session start, and the first build session
-predated `entire enable` here — is resolved: a fresh session inside the fork
-captures normally, and `entire checkpoint list` shows the first checkpoint
-attached to `db337bd`. The `analyze` command consumes this same data, and its
-header reports intent coverage per run (currently `1/4 commits` over
-`HEAD~4..HEAD`), so partial coverage is visible in the output rather than
-silently assumed.
+**What the trail demonstrates.** Each checkpoint's transcript carries the
+*reasoning*, not just the diff — why module-path matching replaced leaf-name
+matching, why the index publishes on merge and never on a PR, why line 59
+versus 60 was documented instead of smoothed over. A fresh session reconstructed
+the product and its open risks from `explain` output alone.
+
+It also demonstrates the limit we then fixed. The pre-noon checkpoint named
+substring-based intent matching and merge-time index freshness as risks, but it
+did **not** name the format-stability assumption — which is what the Curveball
+broke. A checkpoint records the risks you knew about; it does not surface the
+assumption you never questioned. That is an honest argument for *reading* the
+trail critically rather than trusting it as complete — the same discipline this
+change now enforces in the tool itself.
 
 ## Setup, run and test instructions
 
@@ -173,6 +309,9 @@ silently assumed.
 # Prerequisites
 entire plugin install graph
 entire graph version          # v0.4.0
+
+# 0. Unit tests (no dependencies; Node's built-in runner)
+node --test "ci/pr-impact/test/**/*.test.mjs"
 
 # 1. Index each service repo (writes local shards)
 node ci/pr-impact/bin/pr-impact.mjs index --repo ../service-a
@@ -209,7 +348,10 @@ the three `DATABRICKS_*` repository secrets.
 | Condition | Behavior |
 | --- | --- |
 | Warehouse unreachable / quota exhausted | Warns on stderr, falls back to local index shards, check still runs |
-| No checkpoint context | Reports structural cross-repo findings; suppresses the intent comparison rather than marking every consumer unmentioned |
+| No checkpoint context (`completeness: unavailable`) | Reports structural cross-repo findings; suppresses the intent comparison rather than marking every consumer unmentioned |
+| Some transcripts unreadable (`completeness: partial`) | States the shortfall, demotes "never mentioned" to "not found in the N of M readable transcripts", and suppresses its contribution to the risk score |
+| Transcript in an unrecognised format | Counted as unresolved, which lowers completeness; never parsed on a guess |
+| Unknown lifecycle/event types | Counted and surfaced in the report; contribute no intent text; never fatal |
 | Consumer target has no module path (channel, bare import) | Skipped — cannot be attributed to a repo without guessing |
 | Graph plugin missing | Fails loudly; there is no useful degraded mode without it |
 
@@ -277,7 +419,13 @@ local shards instead of failing the check.
   their own manifest readers (`package.json`, `pyproject.toml`).
 - **Intent matching is substring-based** on repo names, so it biases toward
   false negatives — a missed warning rather than a false alarm, which is the
-  wrong direction for a safety tool.
+  wrong direction for a safety tool. Since the Curveball this is at least
+  *bounded*: a partial read can no longer assert absence, so the failure mode
+  is an unscored observation rather than a fabricated finding.
+- **`completeness` is per-run, not per-repo.** One unreadable transcript
+  demotes the whole run to `partial`, including consumers whose evidence was
+  complete. That is deliberately conservative — it under-claims rather than
+  over-claims — but a per-finding completeness model would recover real signal.
 - **`--top` truncation** means a low-reach export with a subtle break can be
   missed.
 - **Index freshness is merge-time.** A consumer that added a call since its

@@ -33,12 +33,28 @@ Checkpoints.
 
 ## Unresolved
 
-- Noon curveball section — not yet issued at time of writing.
-- Checkpoint links section — fills in as milestones land.
+- ~~Noon curveball section~~ — done; see BUILDATHON.md.
+- ~~Checkpoint links section~~ — done; see BUILDATHON.md.
+- `completeness` is per-run, not per-finding: one unreadable transcript demotes
+  the entire run to `partial`. Conservative, but it under-claims.
+- The `jsonl-v2` vocabulary is fixed to the one published fixture. Event names
+  outside it are surfaced as unknown rather than mapped.
 - Route/protocol matching (`HANDLES_ROUTE` <-> `HTTP_CALLS`) — the top next
   step; see risk 1.
 - Manifest readers beyond `go.mod` (npm, Python).
 - Symbol-aware intent extraction to replace substring matching.
+
+## Curveball adaptation (post-noon)
+
+- **Assumption invalidated:** transcript formats are stable and all-or-nothing.
+- **Fix:** `ci/pr-impact/lib/transcript.mjs` — one ingestion layer, structural
+  format detection (never prose matching), three-state `completeness`
+  replacing the binary `available`, unknown events counted and surfaced.
+- **The bug it exposed:** `available: resolved > 0` let 3-of-81 resolved
+  transcripts justify "never mentioned in checkpoint intent" for 78 unread
+  ones, scored at +15. Now demoted and unscored on a partial read.
+- **Verified:** 15/15 `node --test`, including a byte-identical regression lock
+  against a golden captured from the pre-Curveball implementation.
 
 ## Technical risks
 
