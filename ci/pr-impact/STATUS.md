@@ -1,7 +1,11 @@
-# pr-impact — pre-noon stable checkpoint
+# pr-impact — closing checkpoint
 
-Point-in-time record for BTW Buildathon Track 3. Narrative, evidence and
+Final state record for BTW Buildathon Track 3. Narrative, evidence and
 citations live in `BUILDATHON.md`; this file records *state*.
+
+Build sequence: initial understanding (`f7f01f0c1f5b`) → pre-noon stable
+(`0874724419f8`) → noon Curveball adaptation (`9460153f58dd`) → agentic loop
++ review fixes (this checkpoint).
 
 ## Intent
 
