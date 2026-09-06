@@ -56,6 +56,20 @@ Checkpoints.
 - **Verified:** 15/15 `node --test`, including a byte-identical regression lock
   against a golden captured from the pre-Curveball implementation.
 
+## Closing state (post-loop review)
+
+- **Agentic loop implemented.** `pr-impact act` = verify -> decide -> act,
+  with `lib/gate.mjs` (verification + decision rule) and `lib/notify.mjs`
+  (dry-run-by-default consumer notification).
+- **31/31 tests passing**, `node --test`, no dependencies, wired into CI.
+- **Three silent defects found by review and fixed**, each with a test proven
+  to fail without its fix: message-body headings reported as unknown events
+  (16 -> 0); transcript bodies truncated to the first line of each turn
+  (22% -> 91% of characters captured); verifier confirming symbols that do not
+  exist via substring match (now identifier-boundary).
+- All three were invisible to `analyze` and surfaced only when the tool was
+  asked to act on its own output.
+
 ## Technical risks
 
 1. **Protocol-level contracts are not matched.** Only Go module imports are.

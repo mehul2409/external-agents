@@ -145,8 +145,14 @@ export function parseLegacyText(raw) {
   const events = [];
   const unknown = [];
   let sawTranscriptRule = false;
+  // The renderer emits a metadata header, then "## Intent"/"## Summary"
+  // sections, then a labelled rule, then the conversation. Headings are
+  // structural ONLY before that rule: once inside the conversation, a "##"
+  // line is something a person typed, not a section the renderer produced.
+  let inTranscript = false;
   let section = null;      // accumulating "## Intent" / "## Summary" body
   let buffer = [];
+  let current = null;      // the speaker turn currently being accumulated
 
   const flushSection = () => {
     if (section && buffer.length) {
@@ -156,50 +162,79 @@ export function parseLegacyText(raw) {
     section = null;
     buffer = [];
   };
+  const flushTurn = () => {
+    if (current) {
+      current.text = current.lines.join("\n").trim();
+      delete current.lines;
+      events.push(current);
+    }
+    current = null;
+  };
 
   for (const line of text.split("\n")) {
-    if (/^\u2500{3,}/.test(line)) { flushSection(); sawTranscriptRule = true; continue; }
-
-    const heading = line.match(/^##\s+(.+?)\s*$/);
-    if (heading) {
+    // Any box-drawing rule ends the header. The conversation rule is labelled
+    // ("── Transcript (checkpoint scope) ───") and so begins with only two
+    // box characters - matching on three would miss it entirely and drop
+    // every message body that follows.
+    if (/^\u2500{2,}/.test(line)) {
       flushSection();
-      const name = heading[1].toLowerCase();
-      if (name === "intent") section = "intent";
-      else if (name === "summary") section = "summary";
-      else if (name === "files" || name.startsWith("files")) section = null;
-      else {
-        // A heading the original renderer never emitted. Not fatal - record
-        // it and keep reading.
-        unknown.push(`heading:${name}`);
-        section = null;
-      }
+      flushTurn();
+      sawTranscriptRule = true;
+      if (/transcript/i.test(line)) inTranscript = true;
       continue;
     }
 
     const speaker = line.match(LEGACY_SPEAKER);
     if (speaker) {
       flushSection();
-      events.push({
+      flushTurn();
+      // A speaker marker also proves we are in the conversation, even if the
+      // labelled rule was absent or reworded.
+      inTranscript = true;
+      current = {
         kind: speaker[1].toLowerCase(),
-        text: speaker[2].trim(),
+        lines: [speaker[2]],
         source: "legacy-text",
-      });
+      };
       continue;
     }
 
-    const row = line.match(LEGACY_LIST_ROW);
-    if (row) {
-      flushSection();
-      events.push({
-        kind: "summary", text: row[4].trim(), commit: row[3],
-        source: "legacy-list",
-      });
-      continue;
+    if (!inTranscript) {
+      const heading = line.match(/^##\s+(.+?)\s*$/);
+      if (heading) {
+        flushSection();
+        const name = heading[1].toLowerCase();
+        if (name === "intent") section = "intent";
+        else if (name === "summary") section = "summary";
+        else if (name === "files" || name.startsWith("files")) section = null;
+        else {
+          // A heading the original renderer never emitted, in the position
+          // where it emits its own. Not fatal - record it and keep reading.
+          unknown.push(`heading:${name}`);
+          section = null;
+        }
+        continue;
+      }
+
+      const row = line.match(LEGACY_LIST_ROW);
+      if (row) {
+        flushSection();
+        events.push({
+          kind: "summary", text: row[4].trim(), commit: row[3],
+          source: "legacy-list",
+        });
+        continue;
+      }
     }
 
-    if (section) buffer.push(line);
+    // Continuation. A turn spans every line up to the next speaker marker;
+    // capturing only the first line discarded ~78% of the conversation and
+    // biased intent matching toward false "never mentioned" verdicts.
+    if (current) current.lines.push(line);
+    else if (section) buffer.push(line);
   }
   flushSection();
+  flushTurn();
 
   // A rendered transcript whose body never arrived. The section rule is
   // present, so the document is genuinely of this format - it is just cut off.

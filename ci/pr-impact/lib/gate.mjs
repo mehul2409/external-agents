@@ -20,6 +20,16 @@ import { join } from "node:path";
 const WINDOW_BEFORE = 2;
 const WINDOW_AFTER = 40;
 
+// A bare substring test confirms citations for symbols that do not exist:
+// `notif` "matches" `notifyConsumers`. Since verification exists to stop the
+// gate blocking a merge on a false positive, it must not itself be a source
+// of false confirmations. Require an identifier boundary.
+function mentions(haystack, symbol) {
+  if (!haystack || !symbol) return false;
+  const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`).test(haystack);
+}
+
 function readWindow(file, line) {
   if (!existsSync(file)) return null;
   let text;
@@ -37,7 +47,7 @@ export function verifyFinding(finding, { repo = ".", consumerCheckouts = {} } = 
 
   // --- changed symbol, our side -------------------------------------------
   const localWindow = readWindow(join(repo, finding.file), finding.line);
-  const localOk = localWindow != null && localWindow.includes(finding.symbol);
+  const localOk = mentions(localWindow, finding.symbol);
   checks.push({
     side: "changed-symbol",
     target: `${finding.file}:${finding.line ?? "?"}`,
@@ -65,7 +75,7 @@ export function verifyFinding(finding, { repo = ".", consumerCheckouts = {} } = 
     }
     consumersChecked++;
     const w = readWindow(join(root, c.file ?? ""), c.line);
-    const ok = w != null && w.includes(finding.symbol);
+    const ok = mentions(w, finding.symbol);
     if (ok) consumersConfirmed++;
     checks.push({
       side: "consumer",

@@ -39,6 +39,17 @@ Options:
   --index-dir <dir>   Local index location (default: .pr-impact-index)
   --push              Also publish the surface to Databricks
   --no-remote         Never query Databricks; use the local index only
+
+act options:
+  --consumer-checkout <repo_key>=<path>
+                      Supply a consumer checkout so its cited call sites can
+                      be opened and verified. Repeatable.
+  --warn-only         Report the decision but always exit 0
+  --no-verify         Skip source verification before deciding (not advised:
+                      the gate then acts on unverified graph citations)
+  --notify            Open an issue on each blocked consumer repo
+  --no-dry-run        Actually create those issues (default is a dry run,
+                      because this writes to repositories you do not own)
 `;
 
 const DEFAULT_INDEX_DIR = ".pr-impact-index";

@@ -1,0 +1,36 @@
+● Checkpoint abcdef123456
+  session  11111111-2222-3333-4444-555555555555
+  created  2026-09-06 12:00:00
+  author   dev <dev@example.com>
+  commits  abc1234 Do the thing
+────────────────────────────────────────────────────────────
+## Intent
+
+Change ParseClaims and check the downstream repos.
+
+## Summary
+
+Reworked the token path.
+
+## Files (2)
+
+- `tokens/tokens.go`
+
+── Transcript (checkpoint scope) ───────────────────────────
+[User] Please do the following work.
+
+## Step 1 — Investigate
+
+Look at gh/entireio/cli and see what breaks.
+
+## Step 2 — Fix it
+
+Then report back.
+
+[Assistant] Understood. Reading the code now.
+
+## What I found
+
+The signature changed.
+
+[Tool] Bash: run the tests

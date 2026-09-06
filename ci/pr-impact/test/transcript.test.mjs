@@ -71,6 +71,50 @@ test("original format: the checkpoint list table is parsed as a weak "
     "each row carries the commit it came from");
 });
 
+test("original format: markdown headings INSIDE a message body are content, "
+  + "not unrecognised checkpoint events", () => {
+  // Regression. Heading detection used to apply everywhere, so every "## Step 1"
+  // a person typed was reported to the PR as an "unrecognised checkpoint
+  // event" - 16 of them on a real checkpoint, drowning the genuine unknown-event
+  // signal the report exists to carry.
+  const raw = fixture("legacy-body-headings.txt");
+  const parsed = parseTranscript(raw);
+
+  assert.deepEqual(parsed.unknownEvents, [],
+    "headings typed by a person are not checkpoint events");
+
+  // The renderer's OWN sections, which appear before the transcript rule,
+  // are still structural.
+  assert.equal(parsed.events.filter((e) => e.kind === "intent").length, 1);
+  assert.equal(parsed.events.filter((e) => e.kind === "summary").length, 1);
+});
+
+test("original format: a speaker turn spans every line up to the next speaker", () => {
+  // Regression. The labelled rule "── Transcript (checkpoint scope) ───"
+  // begins with only TWO box characters, so a /^─{3,}/ boundary test missed it
+  // and every continuation line was dropped - ~78% of a real transcript body.
+  // That shrinks the intent haystack and biases the tool toward false
+  // "never mentioned" verdicts, which is the wrong direction for a safety tool.
+  const parsed = parseTranscript(fixture("legacy-body-headings.txt"));
+
+  const user = parsed.events.find((e) => e.kind === "user");
+  assert.ok(user.text.includes("Please do the following work."), "first line kept");
+  assert.ok(user.text.includes("Look at gh/entireio/cli"),
+    "continuation lines are captured, not discarded");
+  assert.ok(user.text.includes("Then report back."), "through to the next speaker");
+
+  const assistant = parsed.events.find((e) => e.kind === "assistant");
+  assert.ok(assistant.text.includes("The signature changed."));
+  assert.ok(!assistant.text.includes("Please do the following work."),
+    "turns do not bleed into each other");
+
+  // The consequence that matters: a repo named only in the message body is
+  // findable, so it is not falsely reported as unmentioned.
+  const n = normalize([{ commit: "abc1234", raw: fixture("legacy-body-headings.txt") }]);
+  assert.ok(n.text.includes("gh/entireio/cli"),
+    "a repo mentioned mid-message reaches the intent haystack");
+});
+
 // ------------------------------------------------ 2. new format
 
 test("new JSONL format: the agent's real session fixture parses fully", () => {

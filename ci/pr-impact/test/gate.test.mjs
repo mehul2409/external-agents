@@ -97,6 +97,28 @@ test("verify: confirms consumer citations when a checkout is supplied", () => {
 
 // ------------------------------------------------------------ decide
 
+test("verify: a symbol that only appears as part of a longer identifier "
+  + "is refuted, not confirmed", () => {
+  // Regression. A bare substring test confirmed citations for symbols that do
+  // not exist - `notif` "matched" `notifyConsumers`. Verification exists to
+  // stop the gate blocking a merge on a false positive, so it must not be a
+  // source of false confirmations itself.
+  const bogus = {
+    symbol: "notif",
+    file: "ci/pr-impact/lib/notify.mjs", line: 48, consumers: [],
+  };
+  const v = verifyFinding(bogus, { repo: process.cwd() });
+  assert.equal(v.checks[0].status, "refuted");
+  assert.equal(v.verified, false, "an unverified citation cannot gate a merge");
+
+  const real = {
+    symbol: "notifyConsumers",
+    file: "ci/pr-impact/lib/notify.mjs", line: 48, consumers: [],
+  };
+  assert.equal(verifyFinding(real, { repo: process.cwd() }).checks[0].status,
+    "confirmed", "the real symbol still verifies");
+});
+
 test("decide: blocks a verified, contract-breaking, unmentioned finding", () => {
   const root = repoWith("tokens/tokens.go", 10, "ParseClaims");
   const f = finding();
