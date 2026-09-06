@@ -282,7 +282,48 @@ local shards instead of failing the check.
   missed.
 - **Index freshness is merge-time.** A consumer that added a call since its
   last merge is not yet in the index.
+- **The loop stops at reporting.** The check posts a ranked comment and always
+  exits 0. It does not gate the merge, does not tell the downstream repo it is
+  about to break, and does not confirm the consumer actually fails — only that
+  a contract-breaking change reaches it. Today a human has to read the comment
+  and decide. See below.
 
-**Next steps in priority order:** route/protocol matching via
+### Next step 1 — close the agentic loop
+
+The highest-value remaining work is turning the report into a workflow, which
+is what Track 3 asks for. Detection is done; the loop needs the other three
+phases:
+
+```
+  DETECT   changed export reaches consumers in other repos      [done]
+     ↓
+  VERIFY   open each cited file:line and confirm the call is real
+           (citations resolve to the enclosing function, and weak-pattern
+           matches exist, so acting on an unverified finding would block
+           merges on false positives)
+     ↓
+  DECIDE   gate only where both products agree: contract-breaking AND
+           unmentioned in checkpoint intent
+     ↓
+  ACT      exit non-zero, and open an issue on each consumer repo citing the
+           breaking symbol and their exact call sites
+```
+
+The decision rule is the point. Blocking on "reaches 5 callers" is noise —
+that is ordinary coupling. Blocking on **"reaches 5 callers in another repo
+and the author's own recorded reasoning never mentions them"** is a signal
+worth stopping a merge for, and it is only expressible because the Graph
+supplies the reach and Checkpoints supply the intent. Neither product alone
+justifies the action.
+
+Verification must sit *before* the gate, not after: an unverified graph result
+is evidence, not fact, and gating on it would make the tool untrustworthy the
+first time it blocked a merge wrongly. The same discipline that produced the
+line-59-versus-60 finding above is what makes automated action defensible.
+
+Shape: a `pr-impact act` subcommand plus a `SKILL.md` so a coding agent drives
+verify → decide → act rather than a human reading a table.
+
+**Further steps in priority order:** route/protocol matching via
 `HANDLES_ROUTE` ↔ `HTTP_CALLS`; exact call-site lines; manifest readers for
 npm and Python; symbol-aware intent extraction to replace substring matching.
