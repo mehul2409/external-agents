@@ -14,8 +14,16 @@ const CATALOG = process.env.DATABRICKS_CATALOG ?? "workspace";
 const SCHEMA = process.env.DATABRICKS_SCHEMA ?? "pr_impact";
 const TABLE = `${CATALOG}.${SCHEMA}.service_surface`;
 
+// Workspace URLs are routinely pasted without a scheme, and the bare host
+// answers every API path with a 301 that curl and fetch will not re-issue as
+// an authenticated request - which surfaces as a confusing auth failure.
+function normalizeHost(host) {
+  const trimmed = host.trim().replace(/\/+$/, "");
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 async function sql({ host, token, warehouseId }, statement, parameters = []) {
-  const base = host.replace(/\/+$/, "");
+  const base = normalizeHost(host);
   const res = await fetch(`${base}/api/2.0/sql/statements`, {
     method: "POST",
     headers: {
