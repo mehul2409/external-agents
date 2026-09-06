@@ -219,7 +219,7 @@ the three `DATABRICKS_*` repository secrets.
 
 ```
 workspace.pr_impact.service_surface
-  gh/entireio/cli       12,847 rows
+  gh/entireio/cli       16,075 rows
   gh/entireio/auth-go      217 rows
 ```
 
