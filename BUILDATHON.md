@@ -156,12 +156,16 @@ _To be completed after 12:00._
 
 ## Checkpoint links and what each checkpoint proves
 
-_To be completed._
+_Checkpoint links to be added as milestones land._
 
-> **Known gap at time of writing:** checkpoint capture was not active for the
-> build session, because Claude Code loads Entire hooks at session start and
-> the session predated `entire enable` in this fork. A fresh agent session
-> inside the fork is required for the four milestone checkpoints.
+Checkpoint capture is **now active** in this fork. The earlier gap — Claude
+Code loads Entire hooks at session start, and the first build session
+predated `entire enable` here — is resolved: a fresh session inside the fork
+captures normally, and `entire checkpoint list` shows the first checkpoint
+attached to `db337bd`. The `analyze` command consumes this same data, and its
+header reports intent coverage per run (currently `1/4 commits` over
+`HEAD~4..HEAD`), so partial coverage is visible in the output rather than
+silently assumed.
 
 ## Setup, run and test instructions
 
