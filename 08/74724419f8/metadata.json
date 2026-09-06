@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.10.5",
+  "checkpoint_id": "0874724419f8",
+  "strategy": "manual-commit",
+  "branch": "build",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "BUILDATHON.md",
+    "ci/pr-impact/STATUS.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/08/74724419f8/0/metadata.json",
+      "transcript": "/08/74724419f8/0/full.jsonl",
+      "compact_transcript": "/08/74724419f8/0/transcript.jsonl",
+      "content_hash": "/08/74724419f8/0/content_hash.txt",
+      "prompt": "/08/74724419f8/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 18402,
+    "cache_read_tokens": 707439,
+    "output_tokens": 6499,
+    "api_call_count": 14
+  }
+}
