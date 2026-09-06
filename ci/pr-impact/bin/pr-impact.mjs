@@ -78,11 +78,12 @@ function parseArgs(argv) {
   return opts;
 }
 
-function run(cmd, args, { allowFail = false } = {}) {
+function run(cmd, args, { allowFail = false, cwd } = {}) {
   try {
     return execFileSync(cmd, args, {
       encoding: "utf8", maxBuffer: 512 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
+      cwd,
     });
   } catch (err) {
     if (allowFail) return null;
@@ -296,7 +297,7 @@ function checkpointIntent(opts) {
   let resolved = 0;
   for (const sha of commits.slice(0, 25)) {
     const body = run("entire", ["checkpoint", "explain", "--commit", sha],
-      { allowFail: true });
+      { allowFail: true, cwd: opts.repo });
     const usable = body
       && !/No associated Entire checkpoint/i.test(body)
       && !/checkpoint not found|failed to read checkpoint/i.test(body);
@@ -305,7 +306,8 @@ function checkpointIntent(opts) {
 
   if (resolved === 0) {
     const inRange = new Set(commits.map((c) => c.slice(0, 7)));
-    const listing = run("entire", ["checkpoint", "list"], { allowFail: true }) ?? "";
+    const listing = run("entire", ["checkpoint", "list"],
+      { allowFail: true, cwd: opts.repo }) ?? "";
     for (const line of listing.split("\n")) {
       const m = line.match(/^\s+\d\d-\d\d\s+\d\d:\d\d\s+\(([0-9a-f]{7,40})\)\s+(.+)$/);
       if (m && inRange.has(m[1].slice(0, 7))) { resolved++; parts.push(m[2]); }
