@@ -41,7 +41,11 @@ jobs:
           entire plugin install graph
           entire graph version
 
-      - name: Cross-repo impact
+      # Gate the merge. Exit 1 only when a contract-breaking change reaches
+      # another repo that a COMPLETE reading of checkpoint intent never
+      # mentions, and the citation was confirmed against source. Start with
+      # --warn-only when adopting this across an estate, then remove it.
+      - name: Cross-repo impact gate
         id: impact
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
@@ -49,12 +53,18 @@ jobs:
           DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
         run: |
           BASE="${{ github.event.pull_request.base.sha }}"
-          node ci/pr-impact/bin/pr-impact.mjs analyze \
+          set +e
+          node ci/pr-impact/bin/pr-impact.mjs act \
             --repo . --base "$BASE" --head HEAD \
             --format markdown > impact.md
+          echo "gate_exit=$?" >> "$GITHUB_OUTPUT"
+          set -e
           cat impact.md
 
+      # Always comment, even when the gate blocks - the reviewer needs the
+      # findings in order to act on the failure.
       - name: Comment on PR
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
@@ -80,6 +90,13 @@ jobs:
                 owner, repo, issue_number, body,
               });
             }
+
+      - name: Enforce the gate
+        if: steps.impact.outputs.gate_exit != '0'
+        run: |
+          echo "::error::A contract-breaking change reaches another repository"
+          echo "that your checkpoint intent never mentions. See the PR comment."
+          exit 1
 
   publish:
     if: github.event_name == 'push'

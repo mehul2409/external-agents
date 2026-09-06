@@ -81,11 +81,13 @@ Components, all in this fork:
 
 | Path | Role |
 | --- | --- |
-| `ci/pr-impact/bin/pr-impact.mjs` | `index` and `analyze` commands |
+| `ci/pr-impact/bin/pr-impact.mjs` | `index`, `analyze` and `act` commands |
 | `ci/pr-impact/lib/databricks.mjs` | Shared index over the SQL Statement Execution API |
 | `ci/pr-impact/lib/transcript.mjs` | Single ingestion layer: detect → parse → normalize, for both transcript formats |
 | `ci/pr-impact/test/` | `node --test` suite; fixtures include the agent's real session |
-| `ci/pr-impact/pr-impact.yml` | Workflow: analyze on PR, publish on merge |
+| `ci/pr-impact/lib/gate.mjs` | verify → decide → act: the merge gate |
+| `ci/pr-impact/lib/notify.mjs` | Opens issues on consumer repos (dry run by default) |
+| `ci/pr-impact/pr-impact.yml` | Workflow: gate on PR, publish on merge |
 
 ### Design decisions, and what forced them
 
@@ -327,7 +329,15 @@ export DATABRICKS_TOKEN=<token>
 export DATABRICKS_WAREHOUSE_ID=<warehouse id>
 node ci/pr-impact/bin/pr-impact.mjs index --repo ../service-a --push
 node ci/pr-impact/bin/pr-impact.mjs analyze --repo ../service-a --base HEAD~25
+
+# 4. Gate the merge instead of only reporting (verify -> decide -> act)
+node ci/pr-impact/bin/pr-impact.mjs act --repo ../service-a --base HEAD~25 \
+  --consumer-checkout gh/entireio/cli=../cli   # optional: verify consumer sites
 ```
+
+`act` exits 0 to allow, 1 to block, 2 on usage error. `--warn-only` reports
+without failing the check, `--no-verify` gates on unverified citations, and
+`--notify` opens issues on consumer repos (dry run unless `--no-dry-run`).
 
 Reproduction of the documented finding:
 
@@ -430,47 +440,64 @@ local shards instead of failing the check.
   missed.
 - **Index freshness is merge-time.** A consumer that added a call since its
   last merge is not yet in the index.
-- **The loop stops at reporting.** The check posts a ranked comment and always
-  exits 0. It does not gate the merge, does not tell the downstream repo it is
-  about to break, and does not confirm the consumer actually fails — only that
-  a contract-breaking change reaches it. Today a human has to read the comment
-  and decide. See below.
+- **The gate cannot confirm the consumer actually fails.** It establishes that
+  a contract-breaking change reaches a consumer's cited call sites, not that
+  the consumer's build or tests break. Running downstream tests would need
+  those repos checked out and buildable in CI.
+- **Consumer-side verification needs a checkout.** With none supplied, consumer
+  citations are reported `unavailable` — neither confirmed nor refuted. The
+  gate then rests on the changed-symbol side alone.
 
-### Next step 1 — close the agentic loop
+### The agentic loop (implemented)
 
-The highest-value remaining work is turning the report into a workflow, which
-is what Track 3 asks for. Detection is done; the loop needs the other three
-phases:
+Detection alone left a human to read a table and decide. `pr-impact act`
+closes the loop:
 
 ```
-  DETECT   changed export reaches consumers in other repos      [done]
+  DETECT   changed export reaches consumers in other repos
      ↓
-  VERIFY   open each cited file:line and confirm the call is real
-           (citations resolve to the enclosing function, and weak-pattern
-           matches exist, so acting on an unverified finding would block
-           merges on false positives)
+  VERIFY   open each cited file:line and confirm the symbol is really there
      ↓
-  DECIDE   gate only where both products agree: contract-breaking AND
-           unmentioned in checkpoint intent
+  DECIDE   gate only where BOTH products agree
      ↓
-  ACT      exit non-zero, and open an issue on each consumer repo citing the
-           breaking symbol and their exact call sites
+  ACT      exit non-zero; optionally open an issue on each consumer repo
 ```
 
-The decision rule is the point. Blocking on "reaches 5 callers" is noise —
-that is ordinary coupling. Blocking on **"reaches 5 callers in another repo
-and the author's own recorded reasoning never mentions them"** is a signal
-worth stopping a merge for, and it is only expressible because the Graph
-supplies the reach and Checkpoints supply the intent. Neither product alone
-justifies the action.
+**The decision rule is the point.** Blocking on "reaches 5 callers" is noise —
+that is ordinary coupling. The gate fires only when a change is
+**contract-breaking**, reaches **another repo**, that repo is absent from a
+**complete** reading of the author's checkpoint intent, and the citation was
+**confirmed against source**. That conjunction is only expressible because the
+Graph supplies the reach and Checkpoints supply the intent; neither product
+alone justifies stopping a merge.
 
-Verification must sit *before* the gate, not after: an unverified graph result
-is evidence, not fact, and gating on it would make the tool untrustworthy the
-first time it blocked a merge wrongly. The same discipline that produced the
-line-59-versus-60 finding above is what makes automated action defensible.
+**Verification precedes the decision, never follows it.** An unverified graph
+result is evidence, not fact, and a gate that blocks a merge wrongly is worse
+than no gate. `verifyFinding` reopens every cited line and scans a window —
+because our own citations resolve to the enclosing function, an exact-line
+assertion would reject true positives. A refuted citation downgrades the
+finding to a warning rather than blocking.
 
-Shape: a `pr-impact act` subcommand plus a `SKILL.md` so a coding agent drives
-verify → decide → act rather than a human reading a table.
+**The Curveball constraint, applied to an action.** The Curveball forced a
+distinction between a complete and a partial transcript read. That distinction
+now decides whether the tool is permitted to *act*: `unmentionedRepos` is
+populated only on a complete read and can gate, while `unacknowledgedRepos` —
+its demoted form from a partial read — is reported but can never block. On the
+live demo the gate correctly refuses to fire, stating *"intent read was partial
+(3/25 transcripts) — absence of a mention is not evidence"*. Reporting on
+partial data is acceptable; blocking a merge on it is not.
+
+**Notification is dry-run by default.** Opening issues writes to repositories
+the change's author does not own, so `--notify` prints the payload and
+`--no-dry-run` is required to create anything. Issue bodies cite every call
+site and tell the recipient to confirm against source.
+
+Verified end to end: consumer citations confirmed **5/5** against a real
+`entireio/cli` checkout; the gate correctly ALLOWs on partial intent and on
+non-breaking changes; 13 gate tests cover the block path, both refusal paths,
+the enclosing-function offset, and the notification payload. Real repository
+history contains no breaking + unmentioned + verified case, so the block path
+is proven by unit test rather than by the live demo.
 
 **Further steps in priority order:** route/protocol matching via
 `HANDLES_ROUTE` ↔ `HTTP_CALLS`; exact call-site lines; manifest readers for

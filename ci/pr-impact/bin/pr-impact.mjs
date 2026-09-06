@@ -29,6 +29,12 @@ const USAGE = `pr-impact - cross-repo change impact for microservices
            Report which OTHER repos a change in this one reaches.
            [--format text|markdown|json] [--top <n>]
 
+  act      --repo <path> --base <rev> [analyze options]
+           Verify each finding against source, decide, and exit non-zero when
+           a contract-breaking change reaches another repo that a COMPLETE
+           reading of checkpoint intent never mentions.
+           [--consumer-checkout <repo_key>=<path>] [--warn-only] [--notify]
+
 Options:
   --index-dir <dir>   Local index location (default: .pr-impact-index)
   --push              Also publish the surface to Databricks
@@ -63,6 +69,8 @@ function parseArgs(argv) {
   const opts = {
     repo: ".", head: "HEAD", indexDir: DEFAULT_INDEX_DIR,
     format: "text", top: 8, push: false, remote: true,
+    consumerCheckouts: {}, warnOnly: false, noVerify: false,
+    notify: false, dryRun: true,
   };
   opts.command = argv[0];
   for (let i = 1; i < argv.length; i++) {
@@ -75,6 +83,19 @@ function parseArgs(argv) {
     else if (a === "--top") opts.top = Number(argv[++i]);
     else if (a === "--push") opts.push = true;
     else if (a === "--no-remote") opts.remote = false;
+    // Lets the gate verify consumer citations that CI would otherwise be
+    // unable to open: --consumer-checkout gh/owner/repo=/path
+    else if (a === "--consumer-checkout") {
+      const [key, path] = (argv[++i] ?? "").split("=");
+      if (!key || !path) throw new Error("--consumer-checkout expects <repo_key>=<path>");
+      opts.consumerCheckouts[key] = path;
+    }
+    else if (a === "--warn-only") opts.warnOnly = true;
+    else if (a === "--no-verify") opts.noVerify = true;
+    else if (a === "--notify") opts.notify = true;
+    // Notification writes to OTHER people's repositories, so it stays a
+    // dry run until explicitly told otherwise.
+    else if (a === "--no-dry-run") opts.dryRun = false;
     else if (a === "-h" || a === "--help") opts.help = true;
     else throw new Error(`unknown flag: ${a}`);
   }
@@ -643,7 +664,7 @@ async function main() {
   try { opts = parseArgs(process.argv.slice(2)); }
   catch (err) { process.stderr.write(`${err.message}\n\n${USAGE}`); process.exit(2); }
 
-  if (opts.help || !opts.command || !["index", "analyze"].includes(opts.command)) {
+  if (opts.help || !opts.command || !["index", "analyze", "act"].includes(opts.command)) {
     process.stdout.write(USAGE);
     process.exit(opts.command ? 0 : 2);
   }
@@ -666,7 +687,7 @@ async function main() {
   }
 
   if (!opts.base) {
-    process.stderr.write("analyze requires --base\n");
+    process.stderr.write(`${opts.command} requires --base\n`);
     process.exit(2);
   }
 
@@ -675,10 +696,43 @@ async function main() {
   const remote = await queryRemote(opts, changed.map((c) => c.name));
   const result = analyze(opts, shards, remote);
 
-  if (opts.format === "json") process.stdout.write(JSON.stringify(result, null, 2));
-  else if (opts.format === "markdown") process.stdout.write(renderMarkdown(result));
-  else process.stdout.write(renderText(result));
-  process.stdout.write("\n");
+  if (opts.command === "analyze") {
+    if (opts.format === "json") process.stdout.write(JSON.stringify(result, null, 2));
+    else if (opts.format === "markdown") process.stdout.write(renderMarkdown(result));
+    else process.stdout.write(renderText(result));
+    process.stdout.write("\n");
+    return;
+  }
+
+  // --- act: verify -> decide -> act ----------------------------------------
+  const { verifyFinding, decide, renderDecision } = await import("../lib/gate.mjs");
+
+  // VERIFY before DECIDE. Acting on unverified evidence is the failure mode
+  // that makes an automated gate untrustworthy.
+  for (const f of result.findings) {
+    f.verification = verifyFinding(f, {
+      repo: opts.repo,
+      consumerCheckouts: opts.consumerCheckouts,
+    });
+  }
+
+  const decision = decide(result, { requireVerified: !opts.noVerify });
+
+  const body = (opts.format === "json")
+    ? JSON.stringify({ ...result, decision }, null, 2)
+    : renderMarkdown(result) + "\n" + renderDecision(result, decision);
+  process.stdout.write(body + "\n");
+
+  if (opts.notify && decision.action === "block") {
+    const { notifyConsumers } = await import("../lib/notify.mjs");
+    const res = await notifyConsumers(decision.blocking, { dryRun: opts.dryRun });
+    for (const line of res.log) process.stderr.write(`${line}\n`);
+  }
+
+  // ACT: the exit code is the action. --warn-only keeps the report without
+  // failing the check, for estates adopting the gate gradually.
+  if (opts.warnOnly) return;
+  process.exitCode = decision.exitCode;
 }
 
 // Run only when invoked as the CLI, so the test suite can import the real
