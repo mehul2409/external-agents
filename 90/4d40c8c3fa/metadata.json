@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.10.5",
+  "checkpoint_id": "904d40c8c3fa",
+  "strategy": "manual-commit",
+  "branch": "build",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "BUILDATHON.md",
+    "ci/pr-impact/STATUS.md",
+    "ci/pr-impact/bin/pr-impact.mjs",
+    "ci/pr-impact/lib/gate.mjs",
+    "ci/pr-impact/lib/transcript.mjs",
+    "ci/pr-impact/test/fixtures/legacy-body-headings.txt",
+    "ci/pr-impact/test/gate.test.mjs",
+    "ci/pr-impact/test/transcript.test.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/90/4d40c8c3fa/0/metadata.json",
+      "transcript": "/90/4d40c8c3fa/0/full.jsonl",
+      "compact_transcript": "/90/4d40c8c3fa/0/transcript.jsonl",
+      "content_hash": "/90/4d40c8c3fa/0/content_hash.txt",
+      "prompt": "/90/4d40c8c3fa/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 50,
+    "cache_creation_tokens": 30040,
+    "cache_read_tokens": 3654887,
+    "output_tokens": 18776,
+    "api_call_count": 25
+  }
+}

@@ -1,0 +1,1 @@
+Pull build. The agentic loop is now implemented — pr-impact act (verify → decide → act), lib/gate.mjs, lib/notify.mjs, 13 new tests, 28/28 passing. Review it, then commit a closing checkpoint describing the final state.
