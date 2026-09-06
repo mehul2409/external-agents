@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.10.5",
+  "checkpoint_id": "9460153f58dd",
+  "strategy": "manual-commit",
+  "branch": "build",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "BUILDATHON.md",
+    "ci/pr-impact/STATUS.md",
+    "ci/pr-impact/bin/pr-impact.mjs",
+    "ci/pr-impact/lib/transcript.mjs",
+    "ci/pr-impact/pr-impact.yml",
+    "ci/pr-impact/test/fixtures/README.md",
+    "ci/pr-impact/test/fixtures/golden-input.mjs.txt",
+    "ci/pr-impact/test/fixtures/golden-legacy-complete.md",
+    "ci/pr-impact/test/fixtures/jsonl-v2-complete.jsonl",
+    "ci/pr-impact/test/fixtures/jsonl-v2-equivalent.jsonl",
+    "ci/pr-impact/test/fixtures/jsonl-v2-truncated.jsonl",
+    "ci/pr-impact/test/fixtures/jsonl-v2-unknown-events.jsonl",
+    "ci/pr-impact/test/fixtures/legacy-complete.txt",
+    "ci/pr-impact/test/fixtures/legacy-list.txt",
+    "ci/pr-impact/test/fixtures/legacy-missing.txt",
+    "ci/pr-impact/test/transcript.test.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/94/60153f58dd/0/metadata.json",
+      "transcript": "/94/60153f58dd/0/full.jsonl",
+      "compact_transcript": "/94/60153f58dd/0/transcript.jsonl",
+      "content_hash": "/94/60153f58dd/0/content_hash.txt",
+      "prompt": "/94/60153f58dd/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 100,
+    "cache_creation_tokens": 126684,
+    "cache_read_tokens": 4181032,
+    "output_tokens": 54437,
+    "api_call_count": 50
+  }
+}

@@ -1,0 +1,120 @@
+You are picking up the BTW Buildathon 2026 Track 3 project in this repo, in a
+fresh session, to respond to the Noon Curveball. Work in this order and do not
+skip ahead — the order itself is scored.
+
+## Step 1 — Reconstruct from checkpoint context, before reading code
+
+Run these and read the output:
+
+    entire checkpoint list
+    entire checkpoint explain 0874724419f8
+
+That is the pre-noon stable checkpoint. Also read BUILDATHON.md. Do not edit
+anything yet. Tell me in your own words what the product does and what the
+open risks were, so we know the reconstruction worked.
+
+## Step 2 — The Curveball (Track 3: "The Agent Changed Its Format")
+
+The integrated agent released a new transcript and lifecycle event format;
+existing users still emit the original. Requirements:
+
+- Support both the original and the new format
+- Unknown events must not crash the integration
+- An incomplete transcript must produce a PARTIAL result, not a discarded or
+  corrupted session
+- Existing Checkpoint behaviour must remain compatible
+- Do NOT duplicate the implementation for each format
+- Tests must cover: original format, new format, unknown events, incomplete input
+
+## Step 3 — Graph impact analysis BEFORE editing (this is scored)
+
+The scoring card is explicit that graph use after implementation scores in the
+partial band. So before touching any file, run at least:
+
+    entire graph impact --repo . --symbol ci/pr-impact/bin/pr-impact.mjs:290
+    entire graph search --repo . --profile full --query "parse checkpoint transcript intent and completeness"
+
+Enumerate every parser, lifecycle handler, summary path and checkpoint-writing
+path that consumes intent data. Expected consumers to confirm or refute:
+`analyze`, `scoreFinding`, `renderMarkdown`, `renderText`. Verify each hit by
+opening the cited lines — graph output is evidence, not an oracle, and its
+citations resolve to the enclosing function rather than the exact line.
+
+Report the affected set before you edit.
+
+## Step 4 — The assumption that broke, and the bug it exposes
+
+We assumed the formats we consume are stable and all-or-nothing. Three
+fragilities in `ci/pr-impact/bin/pr-impact.mjs`:
+
+- Lines ~302-303: failure is detected by matching ENGLISH PROSE
+  (`/No associated Entire checkpoint/`, `/checkpoint not found/`). A wording
+  change silently flips "unreadable" to "readable".
+- Line ~312: tier-2 intent parses the HUMAN-RENDERED table of
+  `entire checkpoint list` with a layout regex.
+- Lines ~94-99: `ndjson()` swallows malformed lines and ignores
+  `schema_version`, so a schema shift passes unnoticed.
+
+The real bug: line ~316, `available: resolved > 0` is binary. On our demo run
+intent resolved for 3 of 81 commits, and we then reported consumer repos as
+"never mentioned in checkpoint intent" while 78 transcripts were unread. We
+present partial context as authoritative and manufacture false findings from
+it. The Curveball forbids exactly this.
+
+## Step 5 — Implement
+
+Create `ci/pr-impact/lib/transcript.mjs` as the single ingestion layer:
+
+    raw → detectFormat()  → 'legacy-text' | 'jsonl-v2' | 'unknown'
+        → parse<format>() → the ONLY per-format code
+        → normalize()     → { events, unknownEvents[], completeness, resolved, total }
+
+Everything downstream stays format-agnostic. Do not fork the pipeline per
+format.
+
+Replace the binary `available` flag with completeness:
+
+- `complete`   — every commit in range resolved
+- `partial`    — some resolved. "Unacknowledged" must be DEMOTED to
+                 "not found in the N of M transcripts that were readable",
+                 and its contribution to the risk score suppressed rather
+                 than scored as fact.
+- `unavailable`— structural-only, current behaviour
+
+Unknown event types: count and surface them, never throw.
+
+A JSONL fixture for the new format should be supplied; if it is not present in
+the repo, ask me for it before finalising the parser, and in the meantime
+define the shape from the requirements and keep the parser tolerant.
+
+## Step 6 — Tests
+
+Use `node --test` (built-in, no new dependencies). Cover:
+
+1. original format parses as today
+2. new JSONL format parses to the same normalized shape
+3. unknown event types do not throw and are reported
+4. incomplete input yields `completeness: 'partial'` with correct counts
+5. regression: a fully-resolved legacy transcript produces output identical to
+   the current implementation — this is the proof that existing behaviour is
+   preserved
+
+Run the tests and show me real output. Do not claim they pass without running.
+
+## Step 7 — Commit and checkpoint
+
+Commit with a message stating: which assumption the Curveball invalidated, how
+the design changed, and why the new result is safe. Then confirm the checkpoint
+exists with `entire checkpoint list`, and push to `origin build`.
+
+Finally, fill in the two open BUILDATHON.md sections: "Noon Curveball: what
+changed and how we adapted" and "Checkpoint links and what each checkpoint
+proves" (checkpoints so far: f7f01f0c1f5b initial understanding,
+0874724419f8 pre-noon stable).
+
+Constraints: preserve existing working behaviour; keep the repo runnable at
+every commit; never present incomplete context as complete.
+
+---
+
+/Users/mehul/Desktop/Hackathon/track-3-agent-session.jsonl check this file its a new change basicially mentioned in last of track 3 curveball
