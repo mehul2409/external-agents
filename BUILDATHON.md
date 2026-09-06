@@ -211,6 +211,29 @@ the three `DATABRICKS_*` repository secrets.
 
 ## Databricks use, data sources and limitations
 
+**Status: working and verified end-to-end.**
+
+```
+workspace.pr_impact.service_surface
+  gh/entireio/cli       12,847 rows
+  gh/entireio/auth-go      217 rows
+```
+
+The decisive test: delete the `cli` shard from the local index so the only
+possible source of consumer rows is the warehouse, then re-run. The report is
+**identical** to the local-index run — all five `ParseClaims` call sites, same
+package attribution — with the header confirming `388 Databricks row(s)`
+matched. The warehouse is a verified drop-in for local shards, which is what
+makes the CI story real: the runner never clones `cli` at all.
+
+Running the remote path first surfaced two defects the local path did not
+have, both now fixed: the warehouse query filters on symbol name only (SQL
+cannot evaluate module ownership without the changed symbol's path per row),
+so the module and package filters had to be re-applied to remote rows or the
+warehouse silently reported matches the local index correctly rejected; and
+deduplication keyed on file rather than file+line, which collapsed two calls
+in one file into one and lost `contexts.go:173` and `login.go:512`.
+
 **Capability used:** Delta table on the Lakehouse
 (`workspace.pr_impact.service_surface`), written and queried through the
 **SQL Statement Execution API** (`/api/2.0/sql/statements`) on a serverless

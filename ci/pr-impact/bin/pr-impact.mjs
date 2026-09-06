@@ -359,7 +359,19 @@ function analyze(opts, shards, remote) {
 
     for (const row of remote) {
       if (row.target !== sym.name) continue;
-      if (consumers.some((c) => c.repoKey === row.repo_key && c.file === row.file)) continue;
+      if (row.repo_key === selfKey) continue;
+      // The warehouse query filters by symbol name only - it cannot evaluate
+      // module ownership or package agreement in SQL without shipping the
+      // changed symbol's file path per row. Apply the same two filters the
+      // local path uses, or the remote source silently reports matches the
+      // local one correctly rejects.
+      if (!row.target_path || !ownsTarget(row.target_path)) continue;
+      if (!packageMatches(row.target_path, sym)) continue;
+      // Deduplicate on the full site: two calls in one file are two distinct
+      // findings, and keying on the file alone drops the second.
+      const dup = consumers.some((c) =>
+        c.repoKey === row.repo_key && c.file === row.file && c.line === row.line);
+      if (dup) continue;
       consumers.push({
         target: row.target, repoKey: row.repo_key, type: row.relation_type,
         boundary: BOUNDARY_TYPES.has(row.relation_type), file: row.file,
