@@ -4,7 +4,7 @@
 # Built binaries
 /agents/entire-agent-kiro/entire-agent-kiro
 /agents/entire-agent-kilo/entire-agent-kilo
-bin/
+/bin/
 
 # pr-impact local index shards
 .pr-index/
