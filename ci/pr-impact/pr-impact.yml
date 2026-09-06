@@ -1,0 +1,103 @@
+# Cross-repo impact check for pull requests.
+#
+# Copy into .github/workflows/ in each service repo. Two jobs:
+#   - on PR: analyze the diff against the shared index and comment
+#   - on merge to the default branch: re-publish this repo's surface
+#
+# The index is shared state, so the publish step must run on merge and not on
+# the PR, or an unmerged branch would advertise contracts that do not exist.
+name: pr-impact
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  analyze:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # graph diff needs the merge base, which a shallow clone lacks.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Entire CLI and graph plugin
+        run: |
+          curl -fsSL https://install.entire.io | sh
+          entire plugin install graph
+          entire graph version
+
+      - name: Cross-repo impact
+        id: impact
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          node ci/pr-impact/bin/pr-impact.mjs analyze \
+            --repo . --base "$BASE" --head HEAD \
+            --format markdown > impact.md
+          cat impact.md
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('impact.md', 'utf8');
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            // Update the existing comment instead of stacking a new one on
+            // every push to the branch.
+            const marker = '## Cross-repo impact';
+            const existing = (await github.rest.issues.listComments({
+              owner, repo, issue_number,
+            })).data.find((c) =>
+              c.user.type === 'Bot' && c.body.startsWith(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }
+
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Entire CLI and graph plugin
+        run: |
+          curl -fsSL https://install.entire.io | sh
+          entire plugin install graph
+
+      - name: Publish this repo's surface to the shared index
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+        run: node ci/pr-impact/bin/pr-impact.mjs index --repo . --push
